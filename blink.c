@@ -22,7 +22,6 @@ const uint8_t i2c_magnetic_sen_write = 0x3c;
 const uint16_t ACCEL = (0x32 >> 1);  // 0011001b;
 const uint16_t MAG = (0x3C >> 1);  // 0011110x
 
-
 struct I2CMsg
 {
     uint8_t mode;      // RDMODE, WRMODE
@@ -65,7 +64,8 @@ void vBlinkLED(void * pvParameters)
 //        P1OUT ^= 0x01;
         P4OUT ^= (1 << 6);
 //        data = P1OUT;
-        struct I2CMsg accel_setup_reg = {.mode = WRMODE, .addr = ACCEL, .reg_addr = 0, .count = 1};
+        struct I2CMsg accel_setup_reg = { .mode = WRMODE, .addr = ACCEL,
+                                          .reg_addr = 0, .count = 1 };
         xQueueSendToBack(*taskQueue, &accel_setup_reg, portMAX_DELAY);
 
         vTaskDelay(xDelay);
@@ -227,73 +227,6 @@ void vtestUART(void * pvParameters)
     }
 }
 
-int main2(void)
-{
-    // each hardware needs its own setup
-    vHardwareSetup();
-
-    USART0_Init();
-
-//Each task should have a handler
-    static xTaskHandle BlinkLED_Handler;
-    static xTaskHandle Uart_Handler;
-
-//task creation
-    xTaskCreate(vBlinkLED, "Blink P1.0", configMINIMAL_STACK_SIZE, NULL, 1,
-                &BlinkLED_Handler);
-    xTaskCreate(vtestUART, "UART Test", configMINIMAL_STACK_SIZE, NULL, 1,
-                &Uart_Handler);
-
-//scheduler initialization
-    vTaskStartScheduler();
-
-// should never reach here
-    return 0;
-}
-
-/*const uint8_t i2c_linear_acc_read = 0x33;
- const uint8_t i2c_linear_acc_write = 0x32;
- const uint8_t i2c_magnetic_sen_read = 0x3d;
- const uint8_t i2c_magnetic_sen_write = 0x3c;
- */
-void i2c_init()
-{
-//    PM5CTL0 &= ~LOCKLPM5;
-
-    UCB0CTL1 |= UCSWRST;                    // put eUSCI_B in reset state
-    //UCB0CTLW0 |= UCMODE_3 | UCMST | UCSYNC;
-    UCB0CTLW0 |= UCMODE_3 | UCMST;
-    //    UCB0BRW = 0xf00;
-    UCB0BRW = 0x000A;                       // baud rate = SMCLK / 10 = 100khz
-
-    //P1DIR &= ~(BIT6 | BIT7);
-    //P1SEL0 &= ~(BIT6 | BIT7);
-    UCB0I2CSA = 0x33;
-    UCB0TBCNT = 1;
-    P1SEL1 |= BIT6 | BIT7;
-
-    UCB0CTLW1 |= UCASTP_2;    //?               // Automatic stop generated
-
-    UCB0IE |= UCRXIE | UCNACKIE | UCBCNTIE;  // ?
-
-//    P1OUT |= (BIT6 | BIT7);
-//    P1REN |= (BIT6 | BIT7);
-
-    //    UCB0CTL1 &= ~UCSWRST;
-    UCB0CTL1 &= ~UCSWRST;                   // eUSCI_B in operational state
-    //    UCB0I2CSA = 0;
-
-    __delay_cycles(1600);
-
-    while (UCB0STAT & UCBBUSY)
-        ;
-
-    P1SEL1 |= BIT6 | BIT7;                  // configure I2C pins
-    P1SEL0 &= ~(BIT6 | BIT7);               // configure I2C pins
-    // baud rate = SMCLK / 10 = 100khz
-    UCB0CTL1 &= ~UCSWRST;                   // eUSCI_B in operational state
-}
-
 void i2c_write(uint8_t slv_addr, uint8_t reg_addr, uint8_t data)
 {
 
@@ -400,31 +333,12 @@ void i2c_read_multi(uint8_t slv_addr, uint8_t reg_addr, uint8_t l, uint8_t *arr)
 
 }
 
-int mainx()
-{
-
-//    __bis_SR_register(LPM0_bits); // Enter LPM3
-
-    //__bic_SR_register(LPM3_bits); // exits LPM3
-    // Stop watchdog timer (classic at msp430)
-    WDTCTL = WDTPW + WDTHOLD;
-    i2c_init();
-
-    for (;;)
-    {
-        //        data = i2c_read(i2c_linear_acc_read, 0x27);
-
-        i2c_write(i2c_linear_acc_read, 0X27, 0X40);
-        //i2c_read_multi(i2c_linear_acc_read, 0x28, 1, data);
-        __delay_cycles(2000);
-    }
-}
-
 // {Num_bytes, reg_addr, data..}
 uint8_t buf[16];
 uint8_t gCount;
 uint8_t gCountDone;
 const uint8_t ctrl_reg1 = 0x97;     // 10010111b
+
 int writeI2C(uint8_t addr, int count)
 {
     UCB0I2CSA = addr;
@@ -436,11 +350,11 @@ int writeI2C(uint8_t addr, int count)
 }
 
 void myInit(void);
-
-
+unsigned int xxbuf[16];
+int xxcount = 0;
 void vI2CTask(void *pvParameters)
 {
-    volatile unsigned int i;            // volatile to prevent optimization
+    volatile int i;            // volatile to prevent optimization
     QueueHandle_t *taskQueue = (QueueHandle_t*) pvParameters;
     struct I2CMsg msg;
     buf[0] = ctrl_reg1;
@@ -450,8 +364,37 @@ void vI2CTask(void *pvParameters)
         //       vTaskDelay(500);
         ulTaskNotifyTake( pdTRUE, portMAX_DELAY);
         xQueueReceive(*taskQueue, &msg, portMAX_DELAY);
-        if (msg.mode == WRMODE) {
-            writeI2C(msg.addr, msg.count);
+
+        xxcount = 0;
+        UCB0I2CSA = msg.addr;
+
+        if (msg.mode == WRMODE)
+        {
+            //writeI2C(msg.addr, msg.count);
+            // Send device I2C Address with WRITE flag
+            UCB0CTL1 |= UCTR + UCTXSTT;
+            ulTaskNotifyTake( pdTRUE, portMAX_DELAY);
+
+            // Send register address or command code, and data
+//            for (; msg.count > 0; --msg.count)
+            for (i = 10; i > 0; --i)
+            {
+                UCB0TXBUF = 0x77;
+                UCB0CTL1 |= UCTR + UCTXSTT;
+                ulTaskNotifyTake( pdTRUE, portMAX_DELAY);
+            }
+            ++i;
+        }
+        else
+        {
+            // Send device I2C Address with READ flag
+            UCB0CTLW0 &= ~UCTR;                     // receiver mode
+            UCB0CTLW0 |= UCTXSTT;                   // START condition
+
+            // Get data from I2C device
+            for (; msg.count > 0; --msg.count) {
+//                arr[i] = UCB0RXBUF;
+            }
         }
         //      vTaskDelay(500);
 
@@ -474,17 +417,19 @@ int main(void)
 
     QueueHandle_t xI2CTaskQueue = xQueueCreate(16, sizeof(struct I2CMsg));
 
-    struct I2CMsg accel_setup_reg = {.mode = WRMODE, .addr = ACCEL, .reg_addr = 0, .count = 1};
+    struct I2CMsg accel_setup_reg = { .mode = WRMODE, .addr = ACCEL, .reg_addr =
+                                              0,
+                                      .count = 1 };
     xQueueSendToBack(xI2CTaskQueue, &accel_setup_reg, portMAX_DELAY);
 
     //task creation
-    xTaskCreate(vBlinkLED, "Blink P1.0", configMINIMAL_STACK_SIZE, &xI2CTaskQueue, 1,
-                &BlinkLED_Handler);
+    xTaskCreate(vBlinkLED, "Blink P1.0", configMINIMAL_STACK_SIZE,
+                &xI2CTaskQueue, 1, &BlinkLED_Handler);
 //    xTaskCreate(vtestUART, "UART Test", configMINIMAL_STACK_SIZE, NULL, 1,
 //                &Uart_Handler);
 
-    xTaskCreate(vI2CTask, "I2C Task", configMINIMAL_STACK_SIZE, &xI2CTaskQueue, 1,
-                &I2CTask_Handler);
+    xTaskCreate(vI2CTask, "I2C Task", configMINIMAL_STACK_SIZE, &xI2CTaskQueue,
+                1, &I2CTask_Handler);
 
     //scheduler initialization
     vTaskStartScheduler();
@@ -495,6 +440,8 @@ __interrupt void USCI_B0_ISR(void)
 {
     volatile int i = 0;
     BaseType_t xHigherPriorityTaskWoken;
+
+    xxbuf[xxcount++] = __even_in_range(UCB0IV, USCI_I2C_UCBIT9IFG);
 
     switch (__even_in_range(UCB0IV, USCI_I2C_UCBIT9IFG))
     {
@@ -549,9 +496,9 @@ __interrupt void USCI_B0_ISR(void)
         break;         // Vector 24: TXIFG0
     case USCI_I2C_UCBCNTIFG: // Byte counter zero;                // Vector 26: BCNTIFG
         //      prvClearInterruptSource();
-        xHigherPriorityTaskWoken = pdFALSE;
+//        xHigherPriorityTaskWoken = pdFALSE;
 //        vTaskNotifyGiveFromISR(vI2CTask, &xHigherPriorityTaskWoken);
-        vTaskNotifyGiveFromISR(I2CTask_Handler, &xHigherPriorityTaskWoken);
+//        vTaskNotifyGiveFromISR(I2CTask_Handler, &xHigherPriorityTaskWoken);
 
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
         P1OUT ^= BIT0;                        // Toggle LED on P1.0
@@ -565,6 +512,8 @@ __interrupt void USCI_B0_ISR(void)
     default:
         break;
     }
+    xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(I2CTask_Handler, &xHigherPriorityTaskWoken);
 }
 
 void myInit(void)
